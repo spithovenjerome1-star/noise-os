@@ -13,7 +13,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "db:demo": "tsx prisma/demo.ts",
-    "automations": "tsx scripts/run-automations.ts"
+    "automations": "tsx --conditions=react-server scripts/run-automations.ts"
   },
   "dependencies": {
     "@date-fns/tz": "^1.5.0",

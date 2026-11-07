@@ -24,8 +24,9 @@ export function parseMoney(input: string | number | null | undefined): number | 
   if (typeof input === "number") return Number.isFinite(input) ? Math.round(input * 100) : null;
   let s = input.trim().replace(/[€\s]/g, "").replace(/^EUR/i, "");
   if (!s) return null;
-  // European format "1.234,56" → "1234.56"
-  if (/^-?\d{1,3}(\.\d{3})+(,\d{1,2})?$/.test(s)) s = s.replace(/\./g, "").replace(",", ".");
+  // European format "1.234,56" / "1.000.000" → "1234.56". A single dot group without a
+  // comma decimal ("1.005") is ambiguous and is read as an English decimal point.
+  if (/^-?[1-9]\d{0,2}(\.\d{3})+,\d{1,2}$/.test(s) || /^-?[1-9]\d{0,2}(\.\d{3}){2,}$/.test(s)) s = s.replace(/\./g, "").replace(",", ".");
   // Plain comma decimal "12,50"
   else if (/^-?\d+,\d{1,2}$/.test(s)) s = s.replace(",", ".");
   else s = s.replace(/,/g, "");
