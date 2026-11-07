@@ -1,0 +1,945 @@
+// NOISE OS data model
+// Conventions:
+//  - Money is stored as integer cents (EUR). Never floats.
+//  - Percentages/VAT rates are stored as basis points (18% = 1800).
+//  - Calendar dates without a time (invoice dates, deadlines) use @db.Date and are
+//    interpreted as Europe/Malta calendar days. Moments in time use timestamptz.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────────── Auth & users ─────────────────────────────
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String?
+  role         Role      @default(MEMBER)
+  active       Boolean   @default(true)
+  canLogin     Boolean   @default(true)
+  createdAt    DateTime  @default(now()) @db.Timestamptz
+  updatedAt    DateTime  @updatedAt @db.Timestamptz
+  sessions     Session[]
+
+  assignedVideos Video[]         @relation("VideoAssignee")
+  assignedTasks  Task[]          @relation("TaskAssignee")
+  timeEntries    TimeEntry[]
+  activity       ActivityLog[]
+  scriptVersions ScriptVersion[]
+  clientNotes    ClientNote[]
+}
+
+model Session {
+  id        String   @id // sha256 of the session token
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime @db.Timestamptz
+  createdAt DateTime @default(now()) @db.Timestamptz
+  userAgent String?
+
+  @@index([userId])
+}
+
+// ───────────────────────────── Settings ─────────────────────────────
+
+model Settings {
+  id                     Int      @id @default(1)
+  businessName           String   @default("NOISE")
+  legalName              String?
+  vatNumber              String?
+  address                String?
+  email                  String?
+  phone                  String?
+  iban                   String?
+  publicSiteEnabled      Boolean  @default(true)
+  publicTagline          String?
+  publicAbout            String?
+  instagramUrl           String?
+  invoicePrefix          String   @default("NOISE-")
+  nextInvoiceNumber      Int      @default(1)
+  invoicePadding         Int      @default(4)
+  defaultPaymentTerms    Int      @default(14)
+  defaultTurnaroundDays  Int      @default(7)
+  deadlineWarningDays    Int      @default(2)
+  approvalStaleDays      Int      @default(5)
+  inactiveClientDays     Int      @default(30)
+  estimatedTaxRateBp     Int      @default(1500)
+  invoiceFooter          String?
+  // Hard safety switch. Nothing leaves the system unless this is on.
+  externalCommsEnabled   Boolean  @default(false)
+  updatedAt              DateTime @updatedAt @db.Timestamptz
+}
+
+model VatRate {
+  id        String  @id @default(cuid())
+  name      String
+  rateBp    Int
+  isDefault Boolean @default(false)
+  note      String?
+  archived  Boolean @default(false)
+  position  Int     @default(0)
+}
+
+// ───────────────────────────── Clients ─────────────────────────────
+
+enum ClientStatus {
+  LEAD
+  ACTIVE
+  PAUSED
+  FORMER
+}
+
+model Client {
+  id               String       @id @default(cuid())
+  name             String
+  companyName      String?
+  contactPerson    String?
+  email            String?
+  phone            String?
+  whatsapp         String?
+  website          String?
+  instagram        String?
+  facebook         String?
+  tiktok           String?
+  industry         String?
+  status           ClientStatus @default(LEAD)
+  valueCents       Int?
+  packageLabel     String?
+  startedAt        DateTime?    @db.Date
+  paymentTermsDays Int?
+  turnaroundDays   Int?
+  notes            String?
+  driveUrl         String?
+  brandColors      String?
+  brandFonts       String?
+  brandGuidelines  String?
+  vatNumber        String?
+  billingAddress   String?
+  archivedAt       DateTime?    @db.Timestamptz
+  isDemo           Boolean      @default(false)
+  createdAt        DateTime     @default(now()) @db.Timestamptz
+  updatedAt        DateTime     @updatedAt @db.Timestamptz
+
+  contacts       Contact[]
+  packages       ServicePackage[]
+  projects       Project[]
+  videos         Video[]
+  scripts        Script[]
+  tasks          Task[]
+  events         CalendarEvent[]
+  invoices       Invoice[]
+  expenses       Expense[]
+  attachments    Attachment[]
+  activity       ActivityLog[]
+  notifications  Notification[]
+  shareLinks     ShareLink[]
+  timeEntries    TimeEntry[]
+  clientNotes    ClientNote[]
+  libraryItems   LibraryItem[]
+
+  @@index([status])
+  @@index([name])
+}
+
+model Contact {
+  id        String  @id @default(cuid())
+  clientId  String
+  client    Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name      String
+  role      String?
+  email     String?
+  phone     String?
+  isPrimary Boolean @default(false)
+}
+
+model ClientNote {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  body      String
+  pinned    Boolean  @default(false)
+  authorId  String?
+  author    User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+}
+
+// ───────────────────────────── Packages ─────────────────────────────
+
+enum PackageType {
+  MONTHLY_RETAINER
+  ONE_OFF
+  EVENT
+  BUNDLE
+  HOURLY
+  BARTER
+}
+
+enum RolloverPolicy {
+  NONE
+  ROLLOVER_ALL
+  ROLLOVER_CAPPED
+}
+
+model ServicePackage {
+  id              String         @id @default(cuid())
+  clientId        String
+  client          Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name            String
+  type            PackageType
+  videosIncluded  Int?
+  priceCents      Int            @default(0)
+  hourlyRateCents Int?
+  startDate       DateTime       @db.Date
+  endDate         DateTime?      @db.Date
+  active          Boolean        @default(true)
+  autoRenew       Boolean        @default(true)
+  rolloverPolicy  RolloverPolicy @default(NONE)
+  rolloverCap     Int?
+  turnaroundDays  Int?
+  barterTerms     String?
+  notes           String?
+  createdAt       DateTime       @default(now()) @db.Timestamptz
+  updatedAt       DateTime       @updatedAt @db.Timestamptz
+
+  periods PackagePeriod[]
+}
+
+enum PeriodStatus {
+  OPEN
+  CLOSED
+}
+
+model PackagePeriod {
+  id             String         @id @default(cuid())
+  packageId      String
+  package        ServicePackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  startDate      DateTime       @db.Date
+  endDate        DateTime       @db.Date
+  videosIncluded Int            @default(0)
+  rolledOverIn   Int            @default(0)
+  status         PeriodStatus   @default(OPEN)
+  closedAt       DateTime?      @db.Timestamptz
+  notes          String?
+  createdAt      DateTime       @default(now()) @db.Timestamptz
+
+  videos   Video[]
+  invoices Invoice[]
+
+  @@unique([packageId, startDate])
+}
+
+// ───────────────────────────── Projects & production ─────────────────────────────
+
+enum ProjectStatus {
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  clientId    String
+  client      Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  status      ProjectStatus @default(ACTIVE)
+  startDate   DateTime?     @db.Date
+  dueDate     DateTime?     @db.Date
+  budgetCents Int?
+  createdAt   DateTime      @default(now()) @db.Timestamptz
+  updatedAt   DateTime      @updatedAt @db.Timestamptz
+
+  videos      Video[]
+  tasks       Task[]
+  events      CalendarEvent[]
+  invoices    Invoice[]
+  expenses    Expense[]
+  timeEntries TimeEntry[]
+}
+
+// Semantic meaning of a pipeline stage. Package progress is computed from this,
+// so stages can be renamed/reordered/added without breaking accounting of videos.
+enum StageCategory {
+  PLANNED
+  FILMED
+  EDITING
+  AWAITING_APPROVAL
+  APPROVED
+  DELIVERED
+}
+
+model Stage {
+  id       String        @id @default(cuid())
+  name     String
+  position Int
+  category StageCategory
+  color    String        @default("zinc")
+  archived Boolean       @default(false)
+  videos   Video[]
+}
+
+enum Priority {
+  URGENT
+  HIGH
+  NORMAL
+  LOW
+}
+
+model Video {
+  id                 String         @id @default(cuid())
+  title              String
+  clientId           String
+  client             Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  packagePeriodId    String?
+  packagePeriod      PackagePeriod? @relation(fields: [packagePeriodId], references: [id], onDelete: SetNull)
+  projectId          String?
+  project            Project?       @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  isExtra            Boolean        @default(false)
+  description        String?
+  stageId            String
+  stage              Stage          @relation(fields: [stageId], references: [id])
+  shootDate          DateTime?      @db.Timestamptz
+  filmedOn           DateTime?      @db.Date
+  deadline           DateTime?      @db.Date
+  deadlineOverridden Boolean        @default(false)
+  assigneeId         String?
+  assignee           User?          @relation("VideoAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  priority           Priority       @default(NORMAL)
+  footageUrl         String?
+  premiereUrl        String?
+  reviewUrl          String?
+  deliveryUrl        String?
+  revisionNotes      String?
+  stageChangedAt     DateTime       @default(now()) @db.Timestamptz
+  approvedAt         DateTime?      @db.Timestamptz
+  deliveredAt        DateTime?      @db.Timestamptz
+  position           Float          @default(0)
+  isDemo             Boolean        @default(false)
+  createdAt          DateTime       @default(now()) @db.Timestamptz
+  updatedAt          DateTime       @updatedAt @db.Timestamptz
+
+  script      Script?
+  comments    VideoComment[]
+  approvals   Approval[]
+  tasks       Task[]
+  events      CalendarEvent[]
+  attachments Attachment[]
+  timeEntries TimeEntry[]
+
+  @@index([clientId])
+  @@index([stageId])
+  @@index([packagePeriodId])
+  @@index([deadline])
+}
+
+enum CommentSource {
+  TEAM
+  CLIENT
+}
+
+model VideoComment {
+  id        String        @id @default(cuid())
+  videoId   String
+  video     Video         @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  authorId  String?
+  authorName String
+  body      String
+  internal  Boolean       @default(true)
+  source    CommentSource @default(TEAM)
+  createdAt DateTime      @default(now()) @db.Timestamptz
+}
+
+// ───────────────────────────── Scripts ─────────────────────────────
+
+enum ScriptStatus {
+  DRAFT
+  INTERNAL_REVIEW
+  SENT
+  CHANGES_REQUESTED
+  APPROVED
+}
+
+model Script {
+  id                String       @id @default(cuid())
+  title             String
+  clientId          String
+  client            Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  videoId           String?      @unique
+  video             Video?       @relation(fields: [videoId], references: [id], onDelete: SetNull)
+  status            ScriptStatus @default(DRAFT)
+  hook              String       @default("")
+  mainContent       String       @default("")
+  shotList          String       @default("")
+  voiceover         String       @default("")
+  onScreenText      String       @default("")
+  cta               String       @default("")
+  editingNotes      String       @default("")
+  notes             String       @default("")
+  // Bumped on every content save. Used to detect edits after a version was frozen.
+  revision          Int          @default(0)
+  approvedVersionId String?      @unique
+  approvedVersion   ScriptVersion? @relation("ApprovedVersion", fields: [approvedVersionId], references: [id], onDelete: SetNull)
+  createdAt         DateTime     @default(now()) @db.Timestamptz
+  updatedAt         DateTime     @updatedAt @db.Timestamptz
+
+  versions   ScriptVersion[] @relation("Versions")
+  comments   ScriptComment[]
+  shareLinks ShareLink[]
+}
+
+model ScriptVersion {
+  id          String   @id @default(cuid())
+  scriptId    String
+  script      Script   @relation("Versions", fields: [scriptId], references: [id], onDelete: Cascade)
+  version     Int
+  // Frozen content of all sections at the time of snapshot.
+  content     Json
+  // The script.revision this version was taken from.
+  revision    Int
+  label       String?
+  sentToClient Boolean @default(false)
+  createdById String?
+  createdBy   User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now()) @db.Timestamptz
+
+  approvedOf Script?        @relation("ApprovedVersion")
+  approvals  Approval[]
+  comments   ScriptComment[]
+
+  @@unique([scriptId, version])
+}
+
+model ScriptComment {
+  id         String         @id @default(cuid())
+  scriptId   String
+  script     Script         @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  versionId  String?
+  version    ScriptVersion? @relation(fields: [versionId], references: [id], onDelete: SetNull)
+  parentId   String?
+  parent     ScriptComment? @relation("Thread", fields: [parentId], references: [id], onDelete: Cascade)
+  replies    ScriptComment[] @relation("Thread")
+  authorId   String?
+  authorName String
+  body       String
+  source     CommentSource  @default(TEAM)
+  resolved   Boolean        @default(false)
+  createdAt  DateTime       @default(now()) @db.Timestamptz
+}
+
+enum ApprovalDecision {
+  APPROVED
+  CHANGES_REQUESTED
+}
+
+model Approval {
+  id              String           @id @default(cuid())
+  decision        ApprovalDecision
+  scriptVersionId String?
+  scriptVersion   ScriptVersion?   @relation(fields: [scriptVersionId], references: [id], onDelete: Cascade)
+  videoId         String?
+  video           Video?           @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  byName          String
+  byUserId        String?
+  shareLinkId     String?
+  shareLink       ShareLink?       @relation(fields: [shareLinkId], references: [id], onDelete: SetNull)
+  note            String?
+  ipHash          String?
+  createdAt       DateTime         @default(now()) @db.Timestamptz
+}
+
+enum ShareScope {
+  CLIENT_PORTAL
+  SCRIPT
+}
+
+model ShareLink {
+  id          String     @id @default(cuid())
+  tokenHash   String     @unique
+  scope       ShareScope
+  clientId    String
+  client      Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  scriptId    String?
+  script      Script?    @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  label       String?
+  expiresAt   DateTime?  @db.Timestamptz
+  revokedAt   DateTime?  @db.Timestamptz
+  lastUsedAt  DateTime?  @db.Timestamptz
+  useCount    Int        @default(0)
+  createdById String?
+  createdAt   DateTime   @default(now()) @db.Timestamptz
+  approvals   Approval[]
+}
+
+// ───────────────────────────── Tasks & calendar ─────────────────────────────
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  WAITING_CLIENT
+  DONE
+}
+
+enum Recurrence {
+  NONE
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+model Task {
+  id          String     @id @default(cuid())
+  title       String
+  description String?
+  clientId    String?
+  client      Client?    @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  projectId   String?
+  project     Project?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  videoId     String?
+  video       Video?     @relation(fields: [videoId], references: [id], onDelete: SetNull)
+  assigneeId  String?
+  assignee    User?      @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  priority    Priority   @default(NORMAL)
+  dueDate     DateTime?  @db.Date
+  status      TaskStatus @default(TODO)
+  completedAt DateTime?  @db.Timestamptz
+  recurrence  Recurrence @default(NONE)
+  // Set on the task generated when a recurring task is completed (prevents duplicates).
+  recurredFromId String? @unique
+  recurredFrom   Task?   @relation("Recurring", fields: [recurredFromId], references: [id], onDelete: SetNull)
+  recurredTo     Task?   @relation("Recurring")
+  isDemo      Boolean    @default(false)
+  createdAt   DateTime   @default(now()) @db.Timestamptz
+  updatedAt   DateTime   @updatedAt @db.Timestamptz
+
+  @@index([status, dueDate])
+}
+
+enum EventType {
+  SHOOT
+  MEETING
+  MILESTONE
+  DELIVERY
+  OTHER
+}
+
+model CalendarEvent {
+  id         String    @id @default(cuid())
+  title      String
+  type       EventType @default(OTHER)
+  startsAt   DateTime  @db.Timestamptz
+  endsAt     DateTime  @db.Timestamptz
+  allDay     Boolean   @default(false)
+  location   String?
+  notes      String?
+  clientId   String?
+  client     Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  projectId  String?
+  project    Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  videoId    String?
+  video      Video?    @relation(fields: [videoId], references: [id], onDelete: SetNull)
+  // Reserved for future Google Calendar sync.
+  externalSource String?
+  externalId     String?
+  isDemo     Boolean   @default(false)
+  createdAt  DateTime  @default(now()) @db.Timestamptz
+  updatedAt  DateTime  @updatedAt @db.Timestamptz
+  equipment  EventEquipment[]
+
+  @@index([startsAt])
+}
+
+// ───────────────────────────── Finance ─────────────────────────────
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  CANCELLED
+}
+
+model Invoice {
+  id              String         @id @default(cuid())
+  number          String         @unique
+  clientId        String
+  client          Client         @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  projectId       String?
+  project         Project?       @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  packagePeriodId String?
+  packagePeriod   PackagePeriod? @relation(fields: [packagePeriodId], references: [id], onDelete: SetNull)
+  description     String?
+  issueDate       DateTime       @db.Date
+  dueDate         DateTime       @db.Date
+  // Lifecycle only. "Paid", "Partially paid" and "Overdue" are derived from payments + dates.
+  status          InvoiceStatus  @default(DRAFT)
+  subtotalCents   Int            @default(0)
+  vatCents        Int            @default(0)
+  totalCents      Int            @default(0)
+  vatNote         String?
+  notes           String?
+  sentAt          DateTime?      @db.Timestamptz
+  cancelledAt     DateTime?      @db.Timestamptz
+  isDemo          Boolean        @default(false)
+  createdAt       DateTime       @default(now()) @db.Timestamptz
+  updatedAt       DateTime       @updatedAt @db.Timestamptz
+
+  lines       InvoiceLine[]
+  payments    Payment[]
+  attachments Attachment[]
+
+  @@index([clientId])
+  @@index([issueDate])
+}
+
+model InvoiceLine {
+  id            String  @id @default(cuid())
+  invoiceId     String
+  invoice       Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  description   String
+  // Quantity in hundredths (1.5 hours = 150)
+  qtyHundredths Int     @default(100)
+  unitCents     Int
+  vatRateBp     Int     @default(0)
+  netCents      Int
+  vatCents      Int
+  position      Int     @default(0)
+}
+
+enum PaymentMethod {
+  BANK_TRANSFER
+  CASH
+  CARD
+  REVOLUT
+  PAYPAL
+  CHEQUE
+  BARTER
+  OTHER
+}
+
+model Payment {
+  id          String        @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amountCents Int
+  paidOn      DateTime      @db.Date
+  method      PaymentMethod @default(BANK_TRANSFER)
+  reference   String?
+  notes       String?
+  createdAt   DateTime      @default(now()) @db.Timestamptz
+}
+
+enum ExpenseCategory {
+  CAMERA_EQUIPMENT
+  LENSES_ACCESSORIES
+  SOFTWARE
+  FREELANCE_EDITORS
+  TRANSPORT
+  VEHICLE
+  MARKETING
+  OFFICE
+  TRAVEL
+  OTHER
+}
+
+enum Interval {
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+model Expense {
+  id               String          @id @default(cuid())
+  description      String
+  // Gross amount actually paid (incl. VAT)
+  amountCents      Int
+  vatCents         Int             @default(0)
+  vatRateBp        Int?
+  vatReclaimable   Boolean         @default(true)
+  date             DateTime        @db.Date
+  category         ExpenseCategory
+  vendor           String?
+  clientId         String?
+  client           Client?         @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  projectId        String?
+  project          Project?        @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  paymentMethod    PaymentMethod   @default(CARD)
+  businessUsePct   Int             @default(100)
+  notes            String?
+  recurringId      String?
+  recurring        RecurringExpense? @relation(fields: [recurringId], references: [id], onDelete: SetNull)
+  isDemo           Boolean         @default(false)
+  createdAt        DateTime        @default(now()) @db.Timestamptz
+  updatedAt        DateTime        @updatedAt @db.Timestamptz
+  attachments      Attachment[]
+
+  @@unique([recurringId, date])
+  @@index([date])
+}
+
+model RecurringExpense {
+  id             String          @id @default(cuid())
+  description    String
+  amountCents    Int
+  vatCents       Int             @default(0)
+  category       ExpenseCategory
+  vendor         String?
+  interval       Interval        @default(MONTHLY)
+  nextDate       DateTime        @db.Date
+  endDate        DateTime?       @db.Date
+  active         Boolean         @default(true)
+  paymentMethod  PaymentMethod   @default(CARD)
+  businessUsePct Int             @default(100)
+  createdAt      DateTime        @default(now()) @db.Timestamptz
+  expenses       Expense[]
+}
+
+// ───────────────────────────── Files ─────────────────────────────
+
+enum AttachmentKind {
+  CONTRACT
+  RECEIPT
+  INVOICE_PDF
+  BRAND
+  DELIVERABLE
+  OTHER
+}
+
+model Attachment {
+  id              String         @id @default(cuid())
+  fileName        String
+  mimeType        String
+  sizeBytes       Int
+  storageKey      String         @unique
+  kind            AttachmentKind @default(OTHER)
+  visibleToClient Boolean        @default(false)
+  clientId        String?
+  client          Client?        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  invoiceId       String?
+  invoice         Invoice?       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  expenseId       String?
+  expense         Expense?       @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  videoId         String?
+  video           Video?         @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  uploadedById    String?
+  createdAt       DateTime       @default(now()) @db.Timestamptz
+}
+
+// ───────────────────────────── Activity, notifications, automation ─────────────────────────────
+
+model ActivityLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorLabel String
+  action     String
+  entityType String
+  entityId   String?
+  clientId   String?
+  client     Client?  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  summary    String
+  meta       Json?
+  createdAt  DateTime @default(now()) @db.Timestamptz
+
+  @@index([clientId, createdAt])
+  @@index([createdAt])
+}
+
+enum Severity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+model Notification {
+  id         String    @id @default(cuid())
+  type       String
+  severity   Severity  @default(INFO)
+  title      String
+  body       String?
+  href       String?
+  dedupeKey  String    @unique
+  clientId   String?
+  client     Client?   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  readAt     DateTime? @db.Timestamptz
+  resolvedAt DateTime? @db.Timestamptz
+  createdAt  DateTime  @default(now()) @db.Timestamptz
+
+  @@index([resolvedAt, createdAt])
+}
+
+model AutomationRun {
+  id         String    @id @default(cuid())
+  trigger    String
+  startedAt  DateTime  @default(now()) @db.Timestamptz
+  finishedAt DateTime? @db.Timestamptz
+  result     Json?
+  error      String?
+}
+
+model AutomationRule {
+  key       String  @id
+  enabled   Boolean @default(true)
+  updatedAt DateTime @updatedAt @db.Timestamptz
+}
+
+model MonthlySummary {
+  month       String   @id // YYYY-MM (Europe/Malta)
+  data        Json
+  generatedAt DateTime @default(now()) @db.Timestamptz
+}
+
+// ───────────────────────────── Time, library, equipment ─────────────────────────────
+
+model TimeEntry {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  videoId   String?
+  video     Video?   @relation(fields: [videoId], references: [id], onDelete: SetNull)
+  date      DateTime @db.Date
+  minutes   Int
+  note      String?
+  createdAt DateTime @default(now()) @db.Timestamptz
+}
+
+enum LibraryType {
+  CONCEPT
+  HOOK
+  CAPTION
+  SHOT_LIST
+  TEMPLATE
+}
+
+model LibraryItem {
+  id        String      @id @default(cuid())
+  type      LibraryType
+  title     String
+  body      String
+  tags      String[]
+  clientId  String?
+  client    Client?     @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  createdAt DateTime    @default(now()) @db.Timestamptz
+  updatedAt DateTime    @updatedAt @db.Timestamptz
+}
+
+enum EquipmentStatus {
+  AVAILABLE
+  IN_REPAIR
+  RETIRED
+}
+
+model Equipment {
+  id            String          @id @default(cuid())
+  name          String
+  category      String
+  serialNumber  String?
+  purchasedOn   DateTime?       @db.Date
+  purchaseCents Int?
+  status        EquipmentStatus @default(AVAILABLE)
+  notes         String?
+  createdAt     DateTime        @default(now()) @db.Timestamptz
+  events        EventEquipment[]
+}
+
+model EventEquipment {
+  eventId     String
+  event       CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  equipmentId String
+  equipment   Equipment     @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, equipmentId])
+}
+
+// ───────────────────────────── Import ─────────────────────────────
+
+model ImportLog {
+  id          String         @id @default(cuid())
+  entity      String
+  fileName    String
+  mapping     Json
+  rowsTotal   Int
+  created     Int
+  skipped     Int
+  failed      Int
+  createdById String?
+  createdAt   DateTime       @default(now()) @db.Timestamptz
+  records     ImportRecord[]
+}
+
+model ImportRecord {
+  id          String    @id @default(cuid())
+  importLogId String
+  importLog   ImportLog @relation(fields: [importLogId], references: [id], onDelete: Cascade)
+  rowIndex    Int
+  raw         Json
+  status      String // CREATED | SKIPPED | FAILED
+  entityId    String?
+  message     String?
+}
+
+// ───────────────────────────── Public services & bookings ─────────────────────────────
+
+model Service {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  summary     String?
+  description String?
+  // Shown publicly as "From €X". Null hides the price.
+  fromCents   Int?
+  priceNote   String?
+  durationMin Int?
+  bookable    Boolean  @default(true)
+  published   Boolean  @default(false)
+  position    Int      @default(0)
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+  bookings    BookingRequest[]
+}
+
+enum BookingStatus {
+  NEW
+  CONFIRMED
+  DECLINED
+  CANCELLED
+}
+
+// Submitted from the public booking page. Never auto-confirmed.
+model BookingRequest {
+  id            String        @id @default(cuid())
+  serviceId     String?
+  service       Service?      @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  name          String
+  company       String?
+  email         String
+  phone         String?
+  preferredDate DateTime?     @db.Date
+  preferredTime String?
+  message       String?
+  status        BookingStatus @default(NEW)
+  clientId      String?
+  eventId       String?
+  ipHash        String?
+  createdAt     DateTime      @default(now()) @db.Timestamptz
+  updatedAt     DateTime      @updatedAt @db.Timestamptz
+
+  @@index([status, createdAt])
+}
