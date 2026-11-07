@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 // Cheap edge gate: requests without a session cookie are sent to /login.
 // Real session validation happens server-side in getCurrentUser().
-const PUBLIC = [/^\/login/, /^\/setup/, /^\/portal\//, /^\/p(\/|$)/, /^\/book/, /^\/api\/public\//, /^\/api\/portal\//, /^\/api\/cron\//, /^\/_next\//, /^\/favicon/];
+const PUBLIC = [/^\/login/, /^\/setup/, /^\/portal\//, /^\/p(\/|$)/, /^\/book/, /^\/api\/public\//, /^\/api\/portal\//, /^\/api\/cron\//, /^\/api\/health$/, /^\/_next\//, /^\/favicon/];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

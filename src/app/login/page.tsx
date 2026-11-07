@@ -3,6 +3,8 @@ import { db } from "@/lib/db";
 import { getCurrentUser } from "@/server/auth";
 import { LoginForm } from "./login-form";
 
+export const dynamic = "force-dynamic";
+
 export const metadata = { title: "Sign in" };
 
 export default async function LoginPage() {

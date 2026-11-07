@@ -3,6 +3,8 @@ import { db } from "@/lib/db";
 import { AuthFrame } from "../login/page";
 import { SetupForm } from "./setup-form";
 
+export const dynamic = "force-dynamic";
+
 export const metadata = { title: "Set up" };
 
 export default async function SetupPage() {

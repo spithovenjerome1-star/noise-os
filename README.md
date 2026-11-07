@@ -71,7 +71,23 @@ Remove them any time in **Settings → Data → Remove demo data**.
 - Client health uses a fixed €25/h workload threshold (not yet a setting).
 - Files are stored on local disk — use object storage in production (below).
 
-## Deploying to production
+## Deploying to Railway (recommended)
+
+The repo includes `railway.json`; Railway builds with `pnpm build` and starts with `pnpm start:prod`, which applies migrations and the config seed on every deploy (both are idempotent), then starts the server. Health check: `/api/health`.
+
+1. New project → **Deploy from GitHub repo** → `noise-os`.
+2. In the project, **+ New → Database → PostgreSQL**.
+3. On the app service → **Variables**:
+   - `DATABASE_URL` = `${{Postgres.DATABASE_URL}}`
+   - `APP_URL` = `https://os.noise.mt`
+   - `CRON_SECRET` = a long random string
+   - `STORAGE_DIR` = `/data/storage`
+   - `NODE_ENV` = `production`
+4. App service → **Settings → Volumes → Add volume**, mount path `/data` (keeps uploaded files across deploys).
+5. App service → **Settings → Networking → Custom domain** `os.noise.mt`, then add the CNAME record Railway shows at your DNS provider.
+6. Open the site **immediately** and create the owner account on `/setup` (the setup page is open until the first account exists).
+
+## Deploying elsewhere
 
 Recommended low-cost setup (no paid service required to start, all have free tiers):
 
