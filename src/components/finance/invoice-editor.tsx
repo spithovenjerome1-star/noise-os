@@ -266,7 +266,7 @@ export function InvoiceEditor({ clients, vatRates, defaults, invoice, initialCli
         <Card className="p-4">
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="VAT note (printed on invoice)" hint="e.g. “Exempt under Article 11 of the VAT Act” or “Reverse charge”" htmlFor="vatNote">
-              <Textarea id="vatNote" name="vatNote" rows={3} defaultValue={invoice?.vatNote ?? ""} />
+              <Textarea id="vatNote" name="vatNote" rows={3} defaultValue={invoice ? (invoice.vatNote ?? "") : ((d => (d && d.rateBp === 0 ? d.note ?? "" : ""))(vatRates.find((r) => r.isDefault)))} />
             </Field>
             <Field label="Internal notes (never shown to clients)" htmlFor="notes">
               <Textarea id="notes" name="notes" rows={3} defaultValue={invoice?.notes ?? ""} />

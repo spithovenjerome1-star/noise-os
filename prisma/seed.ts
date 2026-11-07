@@ -19,15 +19,15 @@ const STAGES: { name: string; category: StageCategory; color: string }[] = [
 
 // Malta VAT rates. Rates are configurable in Settings; confirm treatment with your accountant.
 const VAT = [
-  { name: "Standard 18%", rateBp: 1800, isDefault: true, note: "Standard Malta VAT rate", position: 0 },
-  { name: "Reduced 7%", rateBp: 700, note: null, position: 1 },
-  { name: "Reduced 5%", rateBp: 500, note: null, position: 2 },
-  { name: "Zero-rated / exempt", rateBp: 0, note: "e.g. Article 11 small-undertaking exemption, or exempt supply", position: 3 },
-  { name: "Reverse charge (EU B2B)", rateBp: 0, note: "VAT to be accounted for by the recipient", position: 4 },
+  // NOISE is exempt under Article 11 (small undertaking), so that is the default.
+  { name: "Exempt — Article 11", rateBp: 0, isDefault: true, note: "VAT exempt under Article 11 of the VAT Act.", position: 0 },
+  { name: "Standard 18%", rateBp: 1800, note: null, position: 1 },
+  { name: "Reduced 7%", rateBp: 700, note: null, position: 2 },
+  { name: "Reduced 5%", rateBp: 500, note: null, position: 3 },
 ];
 
 async function main() {
-  await db.settings.upsert({ where: { id: 1 }, update: {}, create: { id: 1 } });
+  await db.settings.upsert({ where: { id: 1 }, update: {}, create: { id: 1, invoicePrefix: "SKV-", nextInvoiceNumber: 24, defaultPaymentTerms: 30 } });
   if ((await db.stage.count()) === 0) {
     await db.stage.createMany({ data: STAGES.map((s, i) => ({ ...s, position: i })) });
     console.log("Seeded pipeline stages");
