@@ -149,6 +149,7 @@ model Client {
   timeEntries    TimeEntry[]
   clientNotes    ClientNote[]
   libraryItems   LibraryItem[]
+  sheetSources   SheetSource[]
 
   @@index([status])
   @@index([name])
@@ -329,6 +330,13 @@ model Video {
   approvedAt         DateTime?      @db.Timestamptz
   deliveredAt        DateTime?      @db.Timestamptz
   position           Float          @default(0)
+  // Editor and editor cost, e.g. from the Video Editing Logbook sheet. Currency null = EUR.
+  editorName         String?
+  editorCostCents    Int?
+  editorCurrency     String?
+  // Set when the record mirrors a row in a Google Sheet (see SheetSource).
+  syncSourceId       String?
+  syncKey            String?
   isDemo             Boolean        @default(false)
   createdAt          DateTime       @default(now()) @db.Timestamptz
   updatedAt          DateTime       @updatedAt @db.Timestamptz
@@ -341,6 +349,7 @@ model Video {
   attachments Attachment[]
   timeEntries TimeEntry[]
 
+  @@unique([syncSourceId, syncKey])
   @@index([clientId])
   @@index([stageId])
   @@index([packagePeriodId])
@@ -593,6 +602,8 @@ model Invoice {
   notes           String?
   sentAt          DateTime?      @db.Timestamptz
   cancelledAt     DateTime?      @db.Timestamptz
+  syncSourceId    String?
+  syncKey         String?
   isDemo          Boolean        @default(false)
   createdAt       DateTime       @default(now()) @db.Timestamptz
   updatedAt       DateTime       @updatedAt @db.Timestamptz
@@ -601,6 +612,7 @@ model Invoice {
   payments    Payment[]
   attachments Attachment[]
 
+  @@unique([syncSourceId, syncKey])
   @@index([clientId])
   @@index([issueDate])
 }
@@ -639,7 +651,11 @@ model Payment {
   method      PaymentMethod @default(BANK_TRANSFER)
   reference   String?
   notes       String?
+  syncSourceId String?
+  syncKey     String?
   createdAt   DateTime      @default(now()) @db.Timestamptz
+
+  @@unique([syncSourceId, syncKey])
 }
 
 enum ExpenseCategory {
@@ -681,12 +697,15 @@ model Expense {
   notes            String?
   recurringId      String?
   recurring        RecurringExpense? @relation(fields: [recurringId], references: [id], onDelete: SetNull)
+  syncSourceId     String?
+  syncKey          String?
   isDemo           Boolean         @default(false)
   createdAt        DateTime        @default(now()) @db.Timestamptz
   updatedAt        DateTime        @updatedAt @db.Timestamptz
   attachments      Attachment[]
 
   @@unique([recurringId, date])
+  @@unique([syncSourceId, syncKey])
   @@index([date])
 }
 
@@ -942,4 +961,53 @@ model BookingRequest {
   updatedAt     DateTime      @updatedAt @db.Timestamptz
 
   @@index([status, createdAt])
+}
+
+// ───────────────────────────── Google Sheets sync ─────────────────────────────
+// One-way mirror: rows in a Google Sheet → records here. The app never writes to the sheet.
+// Records created from a sheet carry syncSourceId + syncKey; the sheet decides their values.
+
+enum SheetSourceKind {
+  BUSINESS_ACCOUNT    // month tabs with an invoice table and an expense table, plus "Editing Costs"
+  CLIENT_VIDEO_LOG    // one client's logbook: Video # | Description | Status | Notes
+  CLIENT_CONTENT_LIST // one client's list per month tab: Type | Title | Status
+  EDITING_LOG         // Video | Editor | Price | Status | Currency, one tab per month
+}
+
+model SheetSource {
+  id            String          @id @default(cuid())
+  name          String
+  spreadsheetId String
+  kind          SheetSourceKind
+  // Required for the CLIENT_* kinds: every row belongs to this client.
+  clientId      String?
+  client        Client?         @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  // "Name in sheet = Client name in app", one per line (BUSINESS_ACCOUNT).
+  clientAliases String?
+  enabled       Boolean         @default(true)
+  lastRunAt     DateTime?       @db.Timestamptz
+  lastStatus    String?
+  lastSummary   String?
+  createdAt     DateTime        @default(now()) @db.Timestamptz
+  updatedAt     DateTime        @updatedAt @db.Timestamptz
+
+  runs SheetSyncRun[]
+
+  @@unique([spreadsheetId, kind])
+}
+
+model SheetSyncRun {
+  id         String      @id @default(cuid())
+  sourceId   String
+  source     SheetSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  trigger    String
+  dryRun     Boolean     @default(false)
+  status     String      @default("running")
+  startedAt  DateTime    @default(now()) @db.Timestamptz
+  finishedAt DateTime?   @db.Timestamptz
+  counts     Json?
+  issues     Json?
+  error      String?
+
+  @@index([sourceId, startedAt])
 }

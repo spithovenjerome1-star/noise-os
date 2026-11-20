@@ -4,10 +4,13 @@
 import { RULES, ruleStates } from "../src/server/automations/rules";
 import { runAutomations } from "../src/server/automations/run";
 import { db } from "../src/lib/db";
+import { syncAllSheets } from "../src/server/sheets/run";
 
 async function main() {
   void RULES;
   void ruleStates;
+  const sheets = await syncAllSheets("cli");
+  console.log(JSON.stringify(sheets, null, 2));
   const r = await runAutomations("cli");
   console.log(JSON.stringify(r.result, null, 2));
   if (r.errors.length) {

@@ -8,6 +8,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { fmtDate, fmtMoment, plainOf, todayMalta, timeAgo } from "@/lib/dates";
+import { formatMoney } from "@/lib/money";
 import { SCRIPT_STATUS, TASK_STATUS } from "@/lib/labels";
 import { clientOptions, userOptions, stageList } from "@/server/lookups";
 import { getSettings } from "@/server/settings";
@@ -80,6 +81,15 @@ export default async function VideoPage({ params }: { params: Promise<{ id: stri
               {dto.deadline && <span className="text-xs text-subtle">Due {fmtDate(dto.deadline)}{v.deadlineOverridden ? " (manual)" : v.filmedOn ? " (auto)" : ""}</span>}
               <PriorityMark priority={v.priority} />
               {v.isExtra ? <Badge tone="accent">Extra</Badge> : v.packagePeriod ? <Badge>{v.packagePeriod.package.name}</Badge> : null}
+              {v.editorName && (
+                <span className="text-xs">
+                  Editor: {v.editorName}
+                  {v.editorCostCents !== null && can(user.role, "finance:view")
+                    ? ` · ${v.editorCurrency ? `${(v.editorCostCents / 100).toFixed(2)} ${v.editorCurrency}` : formatMoney(v.editorCostCents)}`
+                    : ""}
+                </span>
+              )}
+              {v.syncSourceId && <Badge tone="info">From Google Sheets</Badge>}
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">

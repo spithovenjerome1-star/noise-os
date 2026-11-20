@@ -10,6 +10,7 @@ import { invoiceTotals, paymentState } from "@/lib/domain/invoices";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { InvoiceStatusBadge } from "@/components/finance/invoice-status";
+import { Badge } from "@/components/ui/badge";
 import { InvoiceActionsBar } from "@/components/finance/invoice-actions-bar";
 import { PaymentList } from "@/components/finance/payment-list";
 import { AttachmentList, UploadButton } from "@/components/attachments";
@@ -52,6 +53,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
           <div className="flex items-center gap-2">
             <h1 className="tabular text-xl font-semibold tracking-tight">{inv.number}</h1>
             <InvoiceStatusBadge state={state} />
+            {inv.syncSourceId && <Badge tone="info">From Google Sheets</Badge>}
           </div>
           <p className="mt-1 text-[13px] text-muted">
             <Link href={`/clients/${inv.client.id}?tab=finances`} className="hover:text-fg hover:underline">

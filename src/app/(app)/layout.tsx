@@ -5,11 +5,13 @@ import { db } from "@/lib/db";
 import { getSettings } from "@/server/settings";
 import { logoutAction } from "@/server/session-actions";
 import { maybeRunAutomations } from "@/server/automations/run";
+import { maybeSyncSheets } from "@/server/sheets/run";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
   // Keep derived alerts fresh without a cron in local use (throttled, never sends anything externally).
   await maybeRunAutomations();
+  maybeSyncSheets();
   const [settings, unread, newBookings] = await Promise.all([
     getSettings(),
     db.notification.count({ where: { resolvedAt: null, readAt: null } }),

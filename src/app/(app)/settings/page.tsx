@@ -8,6 +8,9 @@ import { LinkTabs } from "@/components/ui/tabs";
 import { ruleStates } from "@/server/automations/rules";
 import { CSV_EXPORTS } from "@/server/csv-exports";
 import { BusinessForm, ProductionForm, FinanceSettings, TeamPanel, AutomationsPanel, DataPanel, AccountForm } from "./panels";
+import { SheetsPanel } from "./sheets-panel";
+import { serviceAccount } from "@/server/sheets/google";
+import type { Issue } from "@/lib/domain/sheets";
 
 export const metadata = { title: "Settings" };
 
@@ -17,6 +20,7 @@ const TABS = [
   { key: "finance", label: "Finance & VAT" },
   { key: "team", label: "Team" },
   { key: "automations", label: "Automations" },
+  { key: "sheets", label: "Google Sheets" },
   { key: "data", label: "Data & backup" },
   { key: "account", label: "My account" },
 ];
@@ -54,6 +58,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         />
       )}
       {active === "automations" && <AutomationsPanel rules={await ruleStates()} externalCommsEnabled={settings.externalCommsEnabled} />}
+      {active === "sheets" && <SheetsTab />}
       {active === "data" && (
         <DataPanel
           canExport={can(user.role, "data:export")}
@@ -72,5 +77,28 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       )}
       {active === "account" && <AccountForm name={user.name} email={user.email} />}
     </div>
+  );
+}
+
+async function SheetsTab() {
+  let serviceEmail: string | null = null;
+  let credentialsProblem: string | null = null;
+  try {
+    serviceEmail = serviceAccount()?.client_email ?? null;
+  } catch (e) {
+    credentialsProblem = e instanceof Error ? e.message : String(e);
+  }
+  const sources = await db.sheetSource.findMany({
+    orderBy: { createdAt: "asc" },
+    include: { client: { select: { name: true } }, runs: { where: { dryRun: false }, orderBy: { startedAt: "desc" }, take: 1, select: { issues: true } } },
+  });
+  const clients = await db.client.findMany({ where: { archivedAt: null }, orderBy: { name: "asc" }, select: { id: true, name: true } });
+  return (
+    <SheetsPanel
+      serviceEmail={serviceEmail}
+      credentialsProblem={credentialsProblem}
+      clients={clients}
+      sources={sources.map(({ client, runs, ...s }) => ({ ...s, clientName: client?.name ?? null, lastIssues: (runs[0]?.issues as Issue[] | null) ?? [] }))}
+    />
   );
 }

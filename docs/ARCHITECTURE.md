@@ -42,6 +42,18 @@
 
 Rules live in `src/server/automations`. They are idempotent (each alert has a `dedupeKey`), auto-resolve when their condition clears, can be toggled individually, and every run is recorded in `AutomationRun`. They run throttled when you open the app, and can be scheduled in production via `POST /api/cron/automations` with `Authorization: Bearer $CRON_SECRET` (or `pnpm automations`).
 
+## Google Sheets sync
+
+One-way mirror from Google Sheets into the database (`src/server/sheets`, parsers in `src/lib/domain/sheets.ts`).
+
+- **Read-only access** with a Google service account (`GOOGLE_SERVICE_ACCOUNT_JSON`, scope `spreadsheets.readonly`); the JWT is signed with `node:crypto`, no Google SDK.
+- **Parsers are pure** and locate tables by their header row, so dashboards, spacer rows and mixed date formats (DD/MM/YYYY, ISO, Sheets serial numbers) don't matter. A row missing its number, date or amount is reported, never guessed.
+- **Stable keys.** Records created from a sheet carry `syncSourceId` + `syncKey` (unique together): invoices by number digits (`19` = `SKV-0019`), videos by `VID-###` or tab + title, expenses by tab + date + name + amount (+ occurrence). The same row always updates the same record.
+- **The sheet decides.** Synced records are overwritten to match the sheet; an invoice's payments are replaced by the sheet's *Amount Received*. Existing invoices (e.g. from the one-time import) are adopted by number.
+- **Safe removal.** Records are removed only when their tab was parsed, never more than half at once (layout-change guard). Invoices are never deleted automatically. Videos with app-side work are detached instead of deleted.
+- **Atomic runs.** Each sheet syncs in one transaction; *Preview* runs the same code and rolls back. Every run is stored in `SheetSyncRun` with counts and per-row issues.
+- **Scheduling.** Background run at most every 15 minutes while the app is used (not awaited by pages), plus the cron endpoint and `pnpm automations`.
+
 ## Folder layout
 
 ```
@@ -59,5 +71,4 @@ tests/             vitest unit tests for calculations and permissions
 ## Future integration seams
 
 - **Google Calendar:** `CalendarEvent.externalSource/externalId` are reserved for two-way sync.
-- **Google Sheets import:** the CSV importer's mapping layer accepts any tabular source; a Sheets connector can feed rows into the same pipeline.
 - **Supabase:** point `DATABASE_URL` at Supabase Postgres; optionally swap auth and storage modules.

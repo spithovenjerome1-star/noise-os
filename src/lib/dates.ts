@@ -2,7 +2,7 @@
 // Calendar dates (deadlines, invoice dates) are stored as @db.Date which Prisma
 // returns as a Date at 00:00 UTC — we treat those as "plain dates" (YYYY-MM-DD).
 import { TZDate } from "@date-fns/tz";
-import { addDays, addMonths, addWeeks, addYears, format, parseISO, differenceInCalendarDays } from "date-fns";
+import { format, parseISO } from "date-fns";
 
 export const TZ = "Europe/Malta";
 
@@ -36,20 +36,36 @@ export function dbDateOrNull(p: string | null | undefined): Date | null {
   return dbDate(p);
 }
 
+// Plain-date arithmetic is done in UTC on purpose: date-fns works in the server's local time zone,
+// which shifts UTC-midnight dates by a day around DST changes when the server isn't on UTC.
+const DAY_MS = 86_400_000;
+
+function addDaysUtc(d: Date, n: number) {
+  return new Date(d.getTime() + n * DAY_MS);
+}
+
+/** Add months keeping the day, clamped to the month's last day (Jan 31 + 1 month = Feb 28/29). */
+function addMonthsUtc(d: Date, n: number) {
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth() + n;
+  const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(y, m, Math.min(d.getUTCDate(), last)));
+}
+
 export function addDaysPlain(p: PlainDate, days: number): PlainDate {
-  return plainOf(addDays(dbDate(p), days))!;
+  return plainOf(addDaysUtc(dbDate(p), days))!;
 }
 
 export function addIntervalPlain(p: PlainDate, interval: "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY", n = 1): PlainDate {
   const d = dbDate(p);
   const r =
-    interval === "DAILY" ? addDays(d, n) : interval === "WEEKLY" ? addWeeks(d, n) : interval === "MONTHLY" ? addMonths(d, n) : addYears(d, n);
+    interval === "DAILY" ? addDaysUtc(d, n) : interval === "WEEKLY" ? addDaysUtc(d, 7 * n) : interval === "MONTHLY" ? addMonthsUtc(d, n) : addMonthsUtc(d, 12 * n);
   return plainOf(r)!;
 }
 
 /** Days from a to b (b - a) in calendar days. */
 export function daysBetween(a: PlainDate, b: PlainDate) {
-  return differenceInCalendarDays(dbDate(b), dbDate(a));
+  return Math.round((dbDate(b).getTime() - dbDate(a).getTime()) / DAY_MS);
 }
 
 export function startOfMonthPlain(p: PlainDate): PlainDate {
@@ -57,8 +73,8 @@ export function startOfMonthPlain(p: PlainDate): PlainDate {
 }
 
 export function endOfMonthPlain(p: PlainDate): PlainDate {
-  const next = addMonths(dbDate(startOfMonthPlain(p)), 1);
-  return plainOf(addDays(next, -1))!;
+  const next = addMonthsUtc(dbDate(startOfMonthPlain(p)), 1);
+  return plainOf(addDaysUtc(next, -1))!;
 }
 
 export function monthKey(p: PlainDate) {
